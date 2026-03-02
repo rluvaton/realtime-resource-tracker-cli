@@ -15,12 +15,28 @@ pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
         Constraint::Length(3),
         Constraint::Percentage(50),
         Constraint::Percentage(50),
+        Constraint::Length(3),
     ])
     .split(area);
 
     draw_summary(f, app, chunks[0]);
     draw_cpu_chart(f, app, chunks[1]);
     draw_memory_chart(f, app, chunks[2]);
+    draw_help_bar(f, chunks[3]);
+}
+
+fn draw_help_bar(f: &mut Frame, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border_style());
+
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled(" q/Esc ", theme::highlight_style()),
+        Span::styled(" Quit ", theme::label_style()),
+    ]))
+    .block(block);
+
+    f.render_widget(help, area);
 }
 
 fn draw_summary<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
