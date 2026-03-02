@@ -8,8 +8,6 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use ratatui_image::picker::Picker;
-
 use realtime_resource_tracker_cli::app::App;
 use realtime_resource_tracker_cli::cli::Args;
 use realtime_resource_tracker_cli::error::AppError;
@@ -44,28 +42,21 @@ fn main() -> Result<()> {
         return Err(AppError::IntervalTooSmall(args.interval).into());
     }
 
-    // Detect terminal graphics protocol before entering raw mode.
-    // Use catch_unwind because from_query_stdio can panic in some terminals.
-    let picker = std::panic::catch_unwind(Picker::from_query_stdio)
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or_else(|| Picker::from_fontsize((8, 16)));
-
     let mut app = if let Some(pid) = args.pid {
         let mut sampler = Sampler::new();
         if !sampler.pid_exists(pid) {
             return Err(AppError::ProcessNotFound(pid).into());
         }
-        App::new_monitoring(pid, args.interval, picker)
+        App::new_monitoring(pid, args.interval)
     } else {
-        App::new_picker(args.interval, picker)
+        App::new_picker(args.interval)
     };
 
     let _guard = TerminalGuard;
     let mut terminal = TerminalGuard::init()?;
 
     while !app.should_quit {
-        terminal.draw(|f| ui::draw(f, &mut app))?;
+        terminal.draw(|f| ui::draw(f, &app))?;
         app.handle_event()?;
         app.tick();
     }

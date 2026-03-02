@@ -9,6 +9,4 @@ crossterm = "0.28"
 clap = { version = "4", features = ["derive"] }
 sysinfo = "0.33"
 anyhow = "1"
-ratatui-image = "3.0"
 plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "line_series"] }
-image = "0.25"

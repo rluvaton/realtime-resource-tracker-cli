@@ -1,19 +1,17 @@
-use image::{DynamicImage, RgbImage};
 use plotters::prelude::*;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use ratatui_image::{picker::Picker, StatefulImage};
 
 use crate::app::App;
 use crate::sampler::ProcessSampler;
 use crate::ui::theme;
 
-pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &mut App<S>, area: Rect) {
+pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Percentage(50),
@@ -24,17 +22,14 @@ pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &mut App<S>, area: Rect) {
 
     draw_summary(f, app, chunks[0]);
 
-    // Extract chart data before mutably borrowing the picker
     let cpu_data = app.cpu_series.as_chart_data();
     let cpu_time_range = app.cpu_series.time_range();
     let mem_data = app.mem_series.as_chart_data();
     let mem_time_range = app.mem_series.time_range();
     let mem_max = app.mem_series.max_value();
 
-    if let Some(picker) = &mut app.image_picker {
-        draw_cpu_chart(f, chunks[1], picker, &cpu_data, cpu_time_range);
-        draw_memory_chart(f, chunks[2], picker, &mem_data, mem_time_range, mem_max);
-    }
+    draw_cpu_chart(f, chunks[1], &cpu_data, cpu_time_range);
+    draw_memory_chart(f, chunks[2], &mem_data, mem_time_range, mem_max);
     draw_help_bar(f, chunks[3]);
 }
 
@@ -111,14 +106,13 @@ struct ChartConfig<'a> {
 fn draw_cpu_chart(
     f: &mut Frame,
     area: Rect,
-    picker: &mut Picker,
     data: &[(f64, f64)],
     time_range: Option<(f64, f64)>,
 ) {
     let (x_min, x_max) = time_range.unwrap_or((0.0, 60.0));
     let x_max = x_max.max(x_min + 10.0);
 
-    render_chart(f, area, picker, &ChartConfig {
+    render_chart(f, area, &ChartConfig {
         data,
         x_range: (x_min, x_max),
         y_range: (0.0, 100.0),
@@ -131,7 +125,6 @@ fn draw_cpu_chart(
 fn draw_memory_chart(
     f: &mut Frame,
     area: Rect,
-    picker: &mut Picker,
     data: &[(f64, f64)],
     time_range: Option<(f64, f64)>,
     max_mem: f64,
@@ -140,7 +133,7 @@ fn draw_memory_chart(
     let x_max = x_max.max(x_min + 10.0);
     let y_max = if max_mem <= 0.0 { 100.0 } else { max_mem * 1.1 };
 
-    render_chart(f, area, picker, &ChartConfig {
+    render_chart(f, area, &ChartConfig {
         data,
         x_range: (x_min, x_max),
         y_range: (0.0, y_max),
@@ -150,8 +143,7 @@ fn draw_memory_chart(
     });
 }
 
-fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfig) {
-    // Render the ratatui block border + title around the chart area
+fn render_chart(f: &mut Frame, area: Rect, cfg: &ChartConfig) {
     let block = Block::default()
         .title(Span::styled(cfg.title, cfg.border_color))
         .borders(Borders::ALL)
@@ -159,28 +151,26 @@ fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfi
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let (font_w, font_h) = picker.font_size();
-    let pw = inner.width as u32 * font_w as u32;
-    let ph = inner.height as u32 * font_h as u32;
-
-    if pw == 0 || ph == 0 {
+    if inner.width == 0 || inner.height == 0 {
         return;
     }
+
+    // Render at halfblock resolution: 1 pixel per cell width, 2 pixels per cell height
+    let pw = inner.width as u32;
+    let ph = inner.height as u32 * 2;
 
     let (x_min, x_max) = cfg.x_range;
     let (y_min, y_max) = cfg.y_range;
 
     let mut buf = vec![0u8; (pw * ph * 3) as usize];
 
-    // plotters rendering — no text (BitMapBackend panics without ttf).
-    // Title/labels are handled by the ratatui Block above.
     let ok = (|| -> Result<(), Box<dyn std::error::Error>> {
         let backend = BitMapBackend::with_buffer(&mut buf, (pw, ph));
         let root = backend.into_drawing_area();
         root.fill(&RGBColor(26, 26, 46))?;
 
         let mut chart = ChartBuilder::on(&root)
-            .margin(2)
+            .margin(0)
             .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
         chart
@@ -206,14 +196,24 @@ fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfi
         return;
     }
 
-    let Some(img) = RgbImage::from_raw(pw, ph, buf) else {
-        return;
-    };
-    let dyn_img = DynamicImage::ImageRgb8(img);
+    // Convert pixel buffer to halfblock characters directly into the ratatui buffer
+    let rbuf = f.buffer_mut();
+    for cy in 0..inner.height {
+        for cx in 0..inner.width {
+            let top_row = (cy as u32) * 2;
+            let bot_row = top_row + 1;
 
-    let mut protocol = picker.new_resize_protocol(dyn_img);
-    let image_widget = StatefulImage::new(None);
-    f.render_stateful_widget(image_widget, inner, &mut protocol);
+            let top_off = ((top_row * pw + cx as u32) * 3) as usize;
+            let bot_off = ((bot_row * pw + cx as u32) * 3) as usize;
+
+            let upper = Color::Rgb(buf[top_off], buf[top_off + 1], buf[top_off + 2]);
+            let lower = Color::Rgb(buf[bot_off], buf[bot_off + 1], buf[bot_off + 2]);
+
+            if let Some(cell) = rbuf.cell_mut((inner.x + cx, inner.y + cy)) {
+                cell.set_char('▀').set_fg(upper).set_bg(lower);
+            }
+        }
+    }
 }
 
 fn format_bytes(bytes: u64) -> String {
