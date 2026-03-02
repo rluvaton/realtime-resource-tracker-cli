@@ -13,6 +13,12 @@ pub enum AppMode {
     Monitoring,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SortColumn {
+    Cpu,
+    Memory,
+}
+
 pub struct App<S: ProcessSampler = Sampler> {
     pub mode: AppMode,
     pub target_pid: u32,
@@ -27,6 +33,9 @@ pub struct App<S: ProcessSampler = Sampler> {
     pub all_processes: Vec<ProcessInfo>,
     pub filtered_processes: Vec<ProcessInfo>,
     pub picker_index: usize,
+    pub sort_column: SortColumn,
+    pub sort_ascending: bool,
+    last_refresh: Instant,
 
     pub sampler: S,
     start_time: Instant,
@@ -57,6 +66,9 @@ impl<S: ProcessSampler> App<S> {
             all_processes: Vec::new(),
             filtered_processes: Vec::new(),
             picker_index: 0,
+            sort_column: SortColumn::Cpu,
+            sort_ascending: false,
+            last_refresh: Instant::now(),
             sampler,
             start_time: Instant::now(),
             interval_ms: (interval_secs * 1000.0) as u64,
@@ -65,15 +77,7 @@ impl<S: ProcessSampler> App<S> {
 
     pub fn new_picker_with_sampler(interval_secs: f64, mut sampler: S) -> Self {
         let all = sampler.list_all_processes();
-        let filtered = all
-            .iter()
-            .map(|p| ProcessInfo {
-                pid: p.pid,
-                name: p.name.clone(),
-                cpu_percent: p.cpu_percent,
-                memory_bytes: p.memory_bytes,
-            })
-            .collect();
+        let filtered = clone_process_list(&all);
 
         Self {
             mode: AppMode::Picker,
@@ -87,6 +91,9 @@ impl<S: ProcessSampler> App<S> {
             all_processes: all,
             filtered_processes: filtered,
             picker_index: 0,
+            sort_column: SortColumn::Cpu,
+            sort_ascending: false,
+            last_refresh: Instant::now(),
             sampler,
             start_time: Instant::now(),
             interval_ms: (interval_secs * 1000.0) as u64,
@@ -96,7 +103,15 @@ impl<S: ProcessSampler> App<S> {
     pub fn tick(&mut self) {
         match self.mode {
             AppMode::Monitoring => self.tick_monitoring(),
-            AppMode::Picker => {}
+            AppMode::Picker => self.tick_picker(),
+        }
+    }
+
+    fn tick_picker(&mut self) {
+        if self.last_refresh.elapsed().as_secs() >= 2 {
+            self.all_processes = self.sampler.list_all_processes();
+            self.update_filter();
+            self.last_refresh = Instant::now();
         }
     }
 
@@ -173,6 +188,14 @@ impl<S: ProcessSampler> App<S> {
                     self.picker_index += 1;
                 }
             }
+            KeyCode::Tab => {
+                self.sort_column = match self.sort_column {
+                    SortColumn::Cpu => SortColumn::Memory,
+                    SortColumn::Memory => SortColumn::Cpu,
+                };
+                self.sort_ascending = false;
+                self.sort_filtered();
+            }
             KeyCode::Enter => {
                 if let Some(proc) = self.filtered_processes.get(self.picker_index) {
                     self.target_pid = proc.pid;
@@ -190,18 +213,49 @@ impl<S: ProcessSampler> App<S> {
             .all_processes
             .iter()
             .filter(|p| {
-                p.name.to_lowercase().contains(&query) || p.pid.to_string().contains(&query)
+                p.name.to_lowercase().contains(&query)
+                    || p.command.to_lowercase().contains(&query)
+                    || p.pid.to_string().contains(&query)
             })
-            .map(|p| ProcessInfo {
-                pid: p.pid,
-                name: p.name.clone(),
-                cpu_percent: p.cpu_percent,
-                memory_bytes: p.memory_bytes,
-            })
+            .map(clone_process_info)
             .collect();
+
+        self.sort_filtered();
 
         if self.picker_index >= self.filtered_processes.len() {
             self.picker_index = self.filtered_processes.len().saturating_sub(1);
         }
     }
+
+    fn sort_filtered(&mut self) {
+        let asc = self.sort_ascending;
+        match self.sort_column {
+            SortColumn::Cpu => {
+                self.filtered_processes.sort_by(|a, b| {
+                    let cmp = a.cpu_percent.partial_cmp(&b.cpu_percent).unwrap();
+                    if asc { cmp } else { cmp.reverse() }
+                });
+            }
+            SortColumn::Memory => {
+                self.filtered_processes.sort_by(|a, b| {
+                    let cmp = a.memory_bytes.cmp(&b.memory_bytes);
+                    if asc { cmp } else { cmp.reverse() }
+                });
+            }
+        }
+    }
+}
+
+fn clone_process_info(p: &ProcessInfo) -> ProcessInfo {
+    ProcessInfo {
+        pid: p.pid,
+        name: p.name.clone(),
+        command: p.command.clone(),
+        cpu_percent: p.cpu_percent,
+        memory_bytes: p.memory_bytes,
+    }
+}
+
+fn clone_process_list(list: &[ProcessInfo]) -> Vec<ProcessInfo> {
+    list.iter().map(clone_process_info).collect()
 }

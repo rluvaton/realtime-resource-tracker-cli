@@ -3,6 +3,7 @@ use sysinfo::{Pid, System};
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
+    pub command: String,
     pub cpu_percent: f64,
     pub memory_bytes: u64,
 }
@@ -51,10 +52,23 @@ impl ProcessSampler for Sampler {
         let process = self.system.process(Pid::from_u32(pid))?;
         let cpu_raw = process.cpu_usage() as f64;
         let cpu_normalized = cpu_raw / self.num_cpus as f64;
+        let name = process.name().to_string_lossy().to_string();
+        let cmd_line: String = process
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let command = if cmd_line.is_empty() {
+            name.clone()
+        } else {
+            cmd_line
+        };
 
         Some(ProcessInfo {
             pid,
-            name: process.name().to_string_lossy().to_string(),
+            name,
+            command,
             cpu_percent: cpu_normalized.min(100.0),
             memory_bytes: process.memory(),
         })
@@ -70,9 +84,22 @@ impl ProcessSampler for Sampler {
             .iter()
             .map(|(pid, process)| {
                 let cpu_raw = process.cpu_usage() as f64;
+                let name = process.name().to_string_lossy().to_string();
+                let cmd_line: String = process
+                    .cmd()
+                    .iter()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let command = if cmd_line.is_empty() {
+                    name.clone()
+                } else {
+                    cmd_line
+                };
                 ProcessInfo {
                     pid: pid.as_u32(),
-                    name: process.name().to_string_lossy().to_string(),
+                    name,
+                    command,
                     cpu_percent: (cpu_raw / num_cpus as f64).min(100.0),
                     memory_bytes: process.memory(),
                 }

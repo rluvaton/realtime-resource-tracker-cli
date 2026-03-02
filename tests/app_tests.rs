@@ -1,5 +1,5 @@
 use crossterm::event::KeyCode;
-use realtime_resource_tracker_cli::app::{App, AppMode};
+use realtime_resource_tracker_cli::app::{App, AppMode, SortColumn};
 use realtime_resource_tracker_cli::metrics::TimeSeries;
 use realtime_resource_tracker_cli::sampler::{ProcessInfo, ProcessSampler};
 
@@ -22,6 +22,7 @@ impl MockSampler {
         Self::new(vec![ProcessInfo {
             pid,
             name: name.to_string(),
+            command: name.to_string(),
             cpu_percent: cpu,
             memory_bytes: mem_bytes,
         }])
@@ -39,6 +40,7 @@ impl ProcessSampler for MockSampler {
             .map(|p| ProcessInfo {
                 pid: p.pid,
                 name: p.name.clone(),
+                command: p.command.clone(),
                 cpu_percent: p.cpu_percent,
                 memory_bytes: p.memory_bytes,
             })
@@ -50,6 +52,7 @@ impl ProcessSampler for MockSampler {
             .map(|p| ProcessInfo {
                 pid: p.pid,
                 name: p.name.clone(),
+                command: p.command.clone(),
                 cpu_percent: p.cpu_percent,
                 memory_bytes: p.memory_bytes,
             })
@@ -62,24 +65,28 @@ fn mock_process_list() -> Vec<ProcessInfo> {
         ProcessInfo {
             pid: 1000,
             name: "node".to_string(),
+            command: "node /app/server.js".to_string(),
             cpu_percent: 45.2,
             memory_bytes: 128 * 1024 * 1024,
         },
         ProcessInfo {
             pid: 2000,
             name: "rust-analyzer".to_string(),
+            command: "rust-analyzer --stdio".to_string(),
             cpu_percent: 12.5,
             memory_bytes: 256 * 1024 * 1024,
         },
         ProcessInfo {
             pid: 3000,
             name: "firefox".to_string(),
+            command: "firefox --new-window https://example.com".to_string(),
             cpu_percent: 8.1,
             memory_bytes: 512 * 1024 * 1024,
         },
         ProcessInfo {
             pid: 4000,
             name: "node-worker".to_string(),
+            command: "node /app/worker.js --threads 4".to_string(),
             cpu_percent: 3.0,
             memory_bytes: 64 * 1024 * 1024,
         },
@@ -299,6 +306,22 @@ fn picker_search_filters_by_pid() {
 }
 
 #[test]
+fn picker_search_filters_by_command() {
+    let sampler = MockSampler::new(mock_process_list());
+    let mut app = App::new_picker_with_sampler(1.0, sampler);
+
+    // Type "server.js" to filter by command string
+    for c in "server.js".chars() {
+        app.handle_picker_key(KeyCode::Char(c));
+    }
+
+    assert_eq!(app.filtered_processes.len(), 1);
+    assert_eq!(app.filtered_processes[0].pid, 1000);
+    assert_eq!(app.filtered_processes[0].name, "node");
+    assert!(app.filtered_processes[0].command.contains("server.js"));
+}
+
+#[test]
 fn picker_search_is_case_insensitive() {
     let sampler = MockSampler::new(mock_process_list());
     let mut app = App::new_picker_with_sampler(1.0, sampler);
@@ -476,6 +499,54 @@ fn picker_enter_on_empty_list_does_not_switch_mode() {
 
     app.handle_picker_key(KeyCode::Enter);
     assert_eq!(app.mode, AppMode::Picker); // should stay in picker
+}
+
+// ─── Sort tests ───
+
+#[test]
+fn picker_default_sort_is_cpu_descending() {
+    let sampler = MockSampler::new(mock_process_list());
+    let app = App::new_picker_with_sampler(1.0, sampler);
+
+    assert_eq!(app.sort_column, SortColumn::Cpu);
+    assert!(!app.sort_ascending);
+    // First process should have highest CPU (45.2)
+    assert_eq!(app.filtered_processes[0].pid, 1000);
+    assert_eq!(app.filtered_processes[0].cpu_percent, 45.2);
+}
+
+#[test]
+fn picker_tab_toggles_sort_column() {
+    let sampler = MockSampler::new(mock_process_list());
+    let mut app = App::new_picker_with_sampler(1.0, sampler);
+
+    assert_eq!(app.sort_column, SortColumn::Cpu);
+
+    // Tab switches to Memory
+    app.handle_picker_key(KeyCode::Tab);
+    assert_eq!(app.sort_column, SortColumn::Memory);
+    // Should be sorted by memory descending — firefox has most memory (512MB)
+    assert_eq!(app.filtered_processes[0].pid, 3000);
+
+    // Tab switches back to CPU
+    app.handle_picker_key(KeyCode::Tab);
+    assert_eq!(app.sort_column, SortColumn::Cpu);
+    assert_eq!(app.filtered_processes[0].pid, 1000);
+}
+
+#[test]
+fn picker_sort_by_memory_descending() {
+    let sampler = MockSampler::new(mock_process_list());
+    let mut app = App::new_picker_with_sampler(1.0, sampler);
+
+    app.handle_picker_key(KeyCode::Tab); // switch to Memory sort
+    assert_eq!(app.sort_column, SortColumn::Memory);
+
+    // Verify descending order: 512MB > 256MB > 128MB > 64MB
+    assert_eq!(app.filtered_processes[0].pid, 3000); // firefox, 512MB
+    assert_eq!(app.filtered_processes[1].pid, 2000); // rust-analyzer, 256MB
+    assert_eq!(app.filtered_processes[2].pid, 1000); // node, 128MB
+    assert_eq!(app.filtered_processes[3].pid, 4000); // node-worker, 64MB
 }
 
 // ─── Full flow: picker → monitoring ───

@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{App, SortColumn};
 use crate::sampler::ProcessSampler;
 use crate::ui::theme;
 
@@ -41,20 +41,42 @@ fn draw_search_box<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
 }
 
 fn draw_process_list<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
+    // Fixed column widths: PID(8) + CPU(7) + MEM(10) + borders/padding(2)
+    const FIXED_COLS: u16 = 8 + 7 + 10;
+    // Inner width minus borders (left + right = 2)
+    let inner_width = area.width.saturating_sub(2);
+    let cmd_width = inner_width.saturating_sub(FIXED_COLS) as usize;
+
+    let cpu_label = format!("{:>7}", "CPU%");
+    let mem_label = format!("{:>10}", "MEM (MB)");
+
+    let cpu_indicator = match app.sort_column {
+        SortColumn::Cpu => if app.sort_ascending { " \u{25b2}" } else { " \u{25bc}" },
+        _ => "",
+    };
+    let mem_indicator = match app.sort_column {
+        SortColumn::Memory => if app.sort_ascending { " \u{25b2}" } else { " \u{25bc}" },
+        _ => "",
+    };
+
     let header = ListItem::new(Line::from(vec![
         Span::styled(format!("{:<8}", "PID"), theme::label_style()),
-        Span::styled(format!("{:<20}", "NAME"), theme::label_style()),
-        Span::styled(format!("{:>7}", "CPU%"), theme::cpu_style()),
-        Span::styled(format!("{:>10}", "MEM (MB)"), theme::memory_style()),
+        Span::styled(
+            format!("{:<width$}", "COMMAND", width = cmd_width),
+            theme::label_style(),
+        ),
+        Span::styled(format!("{}{}", cpu_label, cpu_indicator), theme::cpu_style()),
+        Span::styled(format!("{}{}", mem_label, mem_indicator), theme::memory_style()),
     ]));
 
     let mut items = vec![header];
 
     for proc in &app.filtered_processes {
+        let display_cmd = truncate_str(&proc.command, cmd_width.saturating_sub(1));
         let item = ListItem::new(Line::from(vec![
             Span::styled(format!("{:<8}", proc.pid), theme::label_style()),
             Span::styled(
-                format!("{:<20}", truncate_str(&proc.name, 19)),
+                format!("{:<width$}", display_cmd, width = cmd_width),
                 theme::label_style(),
             ),
             Span::styled(format!("{:>7.1}", proc.cpu_percent), theme::cpu_style()),
@@ -93,6 +115,8 @@ fn draw_help_bar(f: &mut Frame, area: Rect) {
     let help = Paragraph::new(Line::from(vec![
         Span::styled(" ↑↓ ", theme::highlight_style()),
         Span::styled(" Navigate  ", theme::label_style()),
+        Span::styled(" Tab ", theme::highlight_style()),
+        Span::styled(" Sort  ", theme::label_style()),
         Span::styled(" Enter ", theme::highlight_style()),
         Span::styled(" Select  ", theme::label_style()),
         Span::styled(" Esc/q ", theme::highlight_style()),
