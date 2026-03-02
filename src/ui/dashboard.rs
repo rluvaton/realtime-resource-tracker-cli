@@ -1,3 +1,4 @@
+use image::{DynamicImage, RgbImage};
 use plotters::prelude::*;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -6,12 +7,13 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol, StatefulImage};
 
 use crate::app::App;
 use crate::sampler::ProcessSampler;
 use crate::ui::theme;
 
-pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
+pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &mut App<S>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Percentage(50),
@@ -28,9 +30,51 @@ pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let mem_time_range = app.mem_series.time_range();
     let mem_max = app.mem_series.max_value();
 
-    draw_cpu_chart(f, chunks[1], &cpu_data, cpu_time_range);
-    draw_memory_chart(f, chunks[2], &mem_data, mem_time_range, mem_max);
+    let (x_min_cpu, x_max_cpu) = cpu_time_range.unwrap_or((0.0, 60.0));
+    let x_max_cpu = x_max_cpu.max(x_min_cpu + 10.0);
+    let (x_min_mem, x_max_mem) = mem_time_range.unwrap_or((0.0, 60.0));
+    let x_max_mem = x_max_mem.max(x_min_mem + 10.0);
+    let y_max_mem = if mem_max <= 0.0 { 100.0 } else { mem_max * 1.1 };
+
+    let cpu_cfg = ChartConfig {
+        data: &cpu_data,
+        x_range: (x_min_cpu, x_max_cpu),
+        y_range: (0.0, 100.0),
+        title: " CPU Usage ",
+        line_color: &GREEN,
+        border_color: Style::from(theme::CPU_COLOR),
+    };
+    let mem_cfg = ChartConfig {
+        data: &mem_data,
+        x_range: (x_min_mem, x_max_mem),
+        y_range: (0.0, y_max_mem),
+        title: " Memory (MB) ",
+        line_color: &CYAN,
+        border_color: Style::from(theme::MEMORY_COLOR),
+    };
+
+    if let Some(picker) = &mut app.image_picker {
+        if uses_image_protocol(picker) {
+            render_chart_image(f, chunks[1], picker, &cpu_cfg);
+            render_chart_image(f, chunks[2], picker, &mem_cfg);
+        } else {
+            render_chart_halfblocks(f, chunks[1], &cpu_cfg);
+            render_chart_halfblocks(f, chunks[2], &mem_cfg);
+        }
+    } else {
+        render_chart_halfblocks(f, chunks[1], &cpu_cfg);
+        render_chart_halfblocks(f, chunks[2], &mem_cfg);
+    }
+
     draw_help_bar(f, chunks[3]);
+}
+
+fn uses_image_protocol(picker: &Picker) -> bool {
+    use ratatui_image::picker::ProtocolType;
+    matches!(
+        picker.protocol_type(),
+        ProtocolType::Sixel | ProtocolType::Kitty | ProtocolType::Iterm2
+    )
 }
 
 fn draw_help_bar(f: &mut Frame, area: Rect) {
@@ -103,74 +147,18 @@ struct ChartConfig<'a> {
     border_color: Style,
 }
 
-fn draw_cpu_chart(
-    f: &mut Frame,
-    area: Rect,
-    data: &[(f64, f64)],
-    time_range: Option<(f64, f64)>,
-) {
-    let (x_min, x_max) = time_range.unwrap_or((0.0, 60.0));
-    let x_max = x_max.max(x_min + 10.0);
-
-    render_chart(f, area, &ChartConfig {
-        data,
-        x_range: (x_min, x_max),
-        y_range: (0.0, 100.0),
-        title: " CPU Usage ",
-        line_color: &GREEN,
-        border_color: Style::from(theme::CPU_COLOR),
-    });
-}
-
-fn draw_memory_chart(
-    f: &mut Frame,
-    area: Rect,
-    data: &[(f64, f64)],
-    time_range: Option<(f64, f64)>,
-    max_mem: f64,
-) {
-    let (x_min, x_max) = time_range.unwrap_or((0.0, 60.0));
-    let x_max = x_max.max(x_min + 10.0);
-    let y_max = if max_mem <= 0.0 { 100.0 } else { max_mem * 1.1 };
-
-    render_chart(f, area, &ChartConfig {
-        data,
-        x_range: (x_min, x_max),
-        y_range: (0.0, y_max),
-        title: " Memory (MB) ",
-        line_color: &CYAN,
-        border_color: Style::from(theme::MEMORY_COLOR),
-    });
-}
-
-fn render_chart(f: &mut Frame, area: Rect, cfg: &ChartConfig) {
-    let block = Block::default()
-        .title(Span::styled(cfg.title, cfg.border_color))
-        .borders(Borders::ALL)
-        .border_style(cfg.border_color);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
-
-    // Render at halfblock resolution: 1 pixel per cell width, 2 pixels per cell height
-    let pw = inner.width as u32;
-    let ph = inner.height as u32 * 2;
-
+/// Render chart into the plotters pixel buffer. Returns false on error.
+fn render_plotters(buf: &mut [u8], pw: u32, ph: u32, cfg: &ChartConfig) -> bool {
     let (x_min, x_max) = cfg.x_range;
     let (y_min, y_max) = cfg.y_range;
 
-    let mut buf = vec![0u8; (pw * ph * 3) as usize];
-
-    let ok = (|| -> Result<(), Box<dyn std::error::Error>> {
-        let backend = BitMapBackend::with_buffer(&mut buf, (pw, ph));
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        let backend = BitMapBackend::with_buffer(buf, (pw, ph));
         let root = backend.into_drawing_area();
         root.fill(&RGBColor(26, 26, 46))?;
 
         let mut chart = ChartBuilder::on(&root)
-            .margin(0)
+            .margin(2)
             .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
         chart
@@ -192,11 +180,63 @@ fn render_chart(f: &mut Frame, area: Rect, cfg: &ChartConfig) {
         Ok(())
     })();
 
-    if ok.is_err() {
+    result.is_ok()
+}
+
+// ── High-res image path (Sixel / Kitty / iTerm2) ──
+
+fn render_chart_image(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfig) {
+    let block = Block::default()
+        .title(Span::styled(cfg.title, cfg.border_color))
+        .borders(Borders::ALL)
+        .border_style(cfg.border_color);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let (font_w, font_h) = picker.font_size();
+    let pw = inner.width as u32 * font_w as u32;
+    let ph = inner.height as u32 * font_h as u32;
+
+    if pw == 0 || ph == 0 {
         return;
     }
 
-    // Convert pixel buffer to halfblock characters directly into the ratatui buffer
+    let mut buf = vec![0u8; (pw * ph * 3) as usize];
+    if !render_plotters(&mut buf, pw, ph, cfg) {
+        return;
+    }
+
+    let Some(img) = RgbImage::from_raw(pw, ph, buf) else {
+        return;
+    };
+    let dyn_img = DynamicImage::ImageRgb8(img);
+
+    let mut protocol: StatefulProtocol = picker.new_resize_protocol(dyn_img);
+    f.render_stateful_widget(StatefulImage::new(None), inner, &mut protocol);
+}
+
+// ── Halfblock fallback path (works in all terminals) ──
+
+fn render_chart_halfblocks(f: &mut Frame, area: Rect, cfg: &ChartConfig) {
+    let block = Block::default()
+        .title(Span::styled(cfg.title, cfg.border_color))
+        .borders(Borders::ALL)
+        .border_style(cfg.border_color);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let pw = inner.width as u32;
+    let ph = inner.height as u32 * 2;
+
+    let mut buf = vec![0u8; (pw * ph * 3) as usize];
+    if !render_plotters(&mut buf, pw, ph, cfg) {
+        return;
+    }
+
     let rbuf = f.buffer_mut();
     for cy in 0..inner.height {
         for cx in 0..inner.width {

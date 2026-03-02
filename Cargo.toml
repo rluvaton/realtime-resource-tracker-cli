@@ -10,3 +10,5 @@ clap = { version = "4", features = ["derive"] }
 sysinfo = "0.33"
 anyhow = "1"
 plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "line_series"] }
+ratatui-image = "3.0"
+image = "0.25"
