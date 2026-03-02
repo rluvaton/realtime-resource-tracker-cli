@@ -1,16 +1,18 @@
+use image::{DynamicImage, RgbImage};
+use plotters::prelude::*;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    symbols,
     text::{Line, Span},
-    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use ratatui_image::{picker::Picker, StatefulImage};
 
 use crate::app::App;
 use crate::sampler::ProcessSampler;
 use crate::ui::theme;
 
-pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
+pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &mut App<S>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Percentage(50),
@@ -20,8 +22,18 @@ pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     .split(area);
 
     draw_summary(f, app, chunks[0]);
-    draw_cpu_chart(f, app, chunks[1]);
-    draw_memory_chart(f, app, chunks[2]);
+
+    // Extract chart data before mutably borrowing the picker
+    let cpu_data = app.cpu_series.as_chart_data();
+    let cpu_time_range = app.cpu_series.time_range();
+    let mem_data = app.mem_series.as_chart_data();
+    let mem_time_range = app.mem_series.time_range();
+    let mem_max = app.mem_series.max_value();
+
+    if let Some(picker) = &mut app.image_picker {
+        draw_cpu_chart(f, chunks[1], picker, &cpu_data, cpu_time_range);
+        draw_memory_chart(f, chunks[2], picker, &mem_data, mem_time_range, mem_max);
+    }
     draw_help_bar(f, chunks[3]);
 }
 
@@ -86,158 +98,114 @@ fn draw_summary<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_cpu_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
-    let raw_data = app.cpu_series.as_chart_data();
-
-    let (x_min, x_max) = app.cpu_series.time_range().unwrap_or((0.0, 60.0));
-    let x_max = x_max.max(x_min + 10.0);
-
-    let num_points = area.width.saturating_sub(10) as usize;
-    let cpu_data = interpolate_data(&raw_data, num_points);
-
-    let x_labels = make_x_labels(x_min, x_max);
-    let y_labels = vec![
-        Span::styled("0%", theme::axis_style()),
-        Span::styled("25%", theme::axis_style()),
-        Span::styled("50%", theme::axis_style()),
-        Span::styled("75%", theme::axis_style()),
-        Span::styled("100%", theme::axis_style()),
-    ];
-
-    let datasets = vec![Dataset::default()
-        .marker(symbols::Marker::HalfBlock)
-        .graph_type(GraphType::Line)
-        .style(theme::cpu_style())
-        .data(&cpu_data)];
-
-    let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .title(Span::styled(" CPU Usage ", theme::cpu_style()))
-                .borders(Borders::ALL)
-                .border_style(Style::from(theme::CPU_COLOR)),
-        )
-        .x_axis(
-            Axis::default()
-                .title(Span::styled("Time (s)", theme::axis_style()))
-                .style(theme::axis_style())
-                .bounds([x_min, x_max])
-                .labels(x_labels),
-        )
-        .y_axis(
-            Axis::default()
-                .style(theme::axis_style())
-                .bounds([0.0, 100.0])
-                .labels(y_labels),
-        );
-
-    f.render_widget(chart, area);
+struct ChartConfig<'a> {
+    data: &'a [(f64, f64)],
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+    title: &'a str,
+    x_desc: &'a str,
+    y_desc: &'a str,
+    line_color: &'a RGBColor,
 }
 
-fn draw_memory_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
-    let raw_data = app.mem_series.as_chart_data();
-
-    let (x_min, x_max) = app.mem_series.time_range().unwrap_or((0.0, 60.0));
+fn draw_cpu_chart(
+    f: &mut Frame,
+    area: Rect,
+    picker: &mut Picker,
+    data: &[(f64, f64)],
+    time_range: Option<(f64, f64)>,
+) {
+    let (x_min, x_max) = time_range.unwrap_or((0.0, 60.0));
     let x_max = x_max.max(x_min + 10.0);
 
-    let max_mem = app.mem_series.max_value();
+    render_chart(f, area, picker, &ChartConfig {
+        data,
+        x_range: (x_min, x_max),
+        y_range: (0.0, 100.0),
+        title: "CPU Usage",
+        x_desc: "Time (s)",
+        y_desc: "CPU %",
+        line_color: &GREEN,
+    });
+}
+
+fn draw_memory_chart(
+    f: &mut Frame,
+    area: Rect,
+    picker: &mut Picker,
+    data: &[(f64, f64)],
+    time_range: Option<(f64, f64)>,
+    max_mem: f64,
+) {
+    let (x_min, x_max) = time_range.unwrap_or((0.0, 60.0));
+    let x_max = x_max.max(x_min + 10.0);
     let y_max = if max_mem <= 0.0 { 100.0 } else { max_mem * 1.1 };
 
-    let num_points = area.width.saturating_sub(10) as usize;
-    let mem_data = interpolate_data(&raw_data, num_points);
-
-    let x_labels = make_x_labels(x_min, x_max);
-    let y_labels = make_mem_y_labels(y_max);
-
-    let datasets = vec![Dataset::default()
-        .marker(symbols::Marker::HalfBlock)
-        .graph_type(GraphType::Line)
-        .style(theme::memory_style())
-        .data(&mem_data)];
-
-    let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .title(Span::styled(" Memory (MB) ", theme::memory_style()))
-                .borders(Borders::ALL)
-                .border_style(Style::from(theme::MEMORY_COLOR)),
-        )
-        .x_axis(
-            Axis::default()
-                .title(Span::styled("Time (s)", theme::axis_style()))
-                .style(theme::axis_style())
-                .bounds([x_min, x_max])
-                .labels(x_labels),
-        )
-        .y_axis(
-            Axis::default()
-                .style(theme::axis_style())
-                .bounds([0.0, y_max])
-                .labels(y_labels),
-        );
-
-    f.render_widget(chart, area);
+    render_chart(f, area, picker, &ChartConfig {
+        data,
+        x_range: (x_min, x_max),
+        y_range: (0.0, y_max),
+        title: "Memory (MB)",
+        x_desc: "Time (s)",
+        y_desc: "MB",
+        line_color: &CYAN,
+    });
 }
 
-fn make_x_labels(x_min: f64, x_max: f64) -> Vec<Span<'static>> {
-    let mid = (x_min + x_max) / 2.0;
-    vec![
-        Span::styled(format!("{:.0}", x_min), theme::axis_style()),
-        Span::styled(format!("{:.0}", mid), theme::axis_style()),
-        Span::styled(format!("{:.0}", x_max), theme::axis_style()),
-    ]
-}
+fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfig) {
+    let (font_w, font_h) = picker.font_size();
+    let pw = area.width as u32 * font_w as u32;
+    let ph = area.height as u32 * font_h as u32;
 
-fn make_mem_y_labels(y_max: f64) -> Vec<Span<'static>> {
-    let steps = 4;
-    (0..=steps)
-        .map(|i| {
-            let val = y_max * i as f64 / steps as f64;
-            Span::styled(format!("{:.0}", val), theme::axis_style())
-        })
-        .collect()
-}
-
-/// Linearly interpolate sparse data into `num_points` evenly-spaced points
-/// so the chart line has no gaps between cells.
-fn interpolate_data(data: &[(f64, f64)], num_points: usize) -> Vec<(f64, f64)> {
-    if data.len() < 2 || num_points < 2 {
-        return data.to_vec();
+    if pw == 0 || ph == 0 {
+        return;
     }
 
-    let x_min = data.first().unwrap().0;
-    let x_max = data.last().unwrap().0;
-    if (x_max - x_min).abs() < f64::EPSILON {
-        return data.to_vec();
-    }
+    let (x_min, x_max) = cfg.x_range;
+    let (y_min, y_max) = cfg.y_range;
 
-    let step = (x_max - x_min) / (num_points - 1) as f64;
-    let mut result = Vec::with_capacity(num_points);
-    let mut idx = 0;
+    let mut buf = vec![0u8; (pw * ph * 3) as usize];
+    {
+        let backend = BitMapBackend::with_buffer(&mut buf, (pw, ph));
+        let root = backend.into_drawing_area();
+        root.fill(&RGBColor(26, 26, 46)).unwrap();
 
-    for i in 0..num_points {
-        let x = x_min + step * i as f64;
+        let mut chart = ChartBuilder::on(&root)
+            .caption(cfg.title, ("sans-serif", 14).into_font().color(&WHITE))
+            .margin(5)
+            .x_label_area_size(30)
+            .y_label_area_size(50)
+            .build_cartesian_2d(x_min..x_max, y_min..y_max)
+            .unwrap();
 
-        // Advance to the segment containing x
-        while idx + 1 < data.len() && data[idx + 1].0 < x {
-            idx += 1;
+        chart
+            .configure_mesh()
+            .x_desc(cfg.x_desc)
+            .y_desc(cfg.y_desc)
+            .axis_style(RGBColor(128, 128, 128))
+            .label_style(("sans-serif", 12).into_font().color(&RGBColor(200, 200, 200)))
+            .light_line_style(RGBColor(50, 50, 70))
+            .draw()
+            .unwrap();
+
+        if cfg.data.len() >= 2 {
+            chart
+                .draw_series(LineSeries::new(
+                    cfg.data.iter().map(|&(x, y)| (x, y)),
+                    cfg.line_color,
+                ))
+                .unwrap();
         }
 
-        if idx + 1 >= data.len() {
-            result.push((x, data.last().unwrap().1));
-        } else {
-            let (x0, y0) = data[idx];
-            let (x1, y1) = data[idx + 1];
-            let t = if (x1 - x0).abs() < f64::EPSILON {
-                0.0
-            } else {
-                (x - x0) / (x1 - x0)
-            };
-            result.push((x, y0 + t * (y1 - y0)));
-        }
+        root.present().unwrap();
     }
 
-    result
+    let img = RgbImage::from_raw(pw, ph, buf).unwrap();
+    let dyn_img = DynamicImage::ImageRgb8(img);
+
+    let mut protocol = picker.new_resize_protocol(dyn_img);
+    let image_widget = StatefulImage::new(None);
+    f.render_stateful_widget(image_widget, area, &mut protocol);
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -248,5 +216,3 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} MB", mb)
     }
 }
-
-use ratatui::style::Style;

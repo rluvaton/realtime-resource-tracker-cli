@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui_image::picker::Picker;
 
 use crate::metrics::TimeSeries;
 use crate::sampler::{ProcessInfo, ProcessSampler, Sampler};
@@ -40,15 +41,21 @@ pub struct App<S: ProcessSampler = Sampler> {
     pub sampler: S,
     start_time: Instant,
     interval_ms: u64,
+
+    pub image_picker: Option<Picker>,
 }
 
 impl App<Sampler> {
-    pub fn new_monitoring(pid: u32, interval_secs: f64) -> Self {
-        Self::new_monitoring_with_sampler(pid, interval_secs, Sampler::new())
+    pub fn new_monitoring(pid: u32, interval_secs: f64, picker: Picker) -> Self {
+        let mut app = Self::new_monitoring_with_sampler(pid, interval_secs, Sampler::new());
+        app.image_picker = Some(picker);
+        app
     }
 
-    pub fn new_picker(interval_secs: f64) -> Self {
-        Self::new_picker_with_sampler(interval_secs, Sampler::new())
+    pub fn new_picker(interval_secs: f64, picker: Picker) -> Self {
+        let mut app = Self::new_picker_with_sampler(interval_secs, Sampler::new());
+        app.image_picker = Some(picker);
+        app
     }
 }
 
@@ -72,6 +79,7 @@ impl<S: ProcessSampler> App<S> {
             sampler,
             start_time: Instant::now(),
             interval_ms: (interval_secs * 1000.0) as u64,
+            image_picker: None,
         }
     }
 
@@ -97,6 +105,7 @@ impl<S: ProcessSampler> App<S> {
             sampler,
             start_time: Instant::now(),
             interval_ms: (interval_secs * 1000.0) as u64,
+            image_picker: None,
         }
     }
 

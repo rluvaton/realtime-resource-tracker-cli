@@ -8,6 +8,8 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
+use ratatui_image::picker::Picker;
+
 use realtime_resource_tracker_cli::app::App;
 use realtime_resource_tracker_cli::cli::Args;
 use realtime_resource_tracker_cli::error::AppError;
@@ -42,21 +44,25 @@ fn main() -> Result<()> {
         return Err(AppError::IntervalTooSmall(args.interval).into());
     }
 
+    // Detect terminal graphics protocol before entering raw mode
+    let picker = Picker::from_query_stdio()
+        .unwrap_or_else(|_| Picker::from_fontsize((8, 16)));
+
     let mut app = if let Some(pid) = args.pid {
         let mut sampler = Sampler::new();
         if !sampler.pid_exists(pid) {
             return Err(AppError::ProcessNotFound(pid).into());
         }
-        App::new_monitoring(pid, args.interval)
+        App::new_monitoring(pid, args.interval, picker)
     } else {
-        App::new_picker(args.interval)
+        App::new_picker(args.interval, picker)
     };
 
     let _guard = TerminalGuard;
     let mut terminal = TerminalGuard::init()?;
 
     while !app.should_quit {
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &mut app))?;
         app.handle_event()?;
         app.tick();
     }
