@@ -2,6 +2,7 @@ use image::{DynamicImage, RgbImage};
 use plotters::prelude::*;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -103,9 +104,8 @@ struct ChartConfig<'a> {
     x_range: (f64, f64),
     y_range: (f64, f64),
     title: &'a str,
-    x_desc: &'a str,
-    y_desc: &'a str,
     line_color: &'a RGBColor,
+    border_color: Style,
 }
 
 fn draw_cpu_chart(
@@ -122,10 +122,9 @@ fn draw_cpu_chart(
         data,
         x_range: (x_min, x_max),
         y_range: (0.0, 100.0),
-        title: "CPU Usage",
-        x_desc: "Time (s)",
-        y_desc: "CPU %",
+        title: " CPU Usage ",
         line_color: &GREEN,
+        border_color: Style::from(theme::CPU_COLOR),
     });
 }
 
@@ -145,17 +144,24 @@ fn draw_memory_chart(
         data,
         x_range: (x_min, x_max),
         y_range: (0.0, y_max),
-        title: "Memory (MB)",
-        x_desc: "Time (s)",
-        y_desc: "MB",
+        title: " Memory (MB) ",
         line_color: &CYAN,
+        border_color: Style::from(theme::MEMORY_COLOR),
     });
 }
 
 fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfig) {
+    // Render the ratatui block border + title around the chart area
+    let block = Block::default()
+        .title(Span::styled(cfg.title, cfg.border_color))
+        .borders(Borders::ALL)
+        .border_style(cfg.border_color);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
     let (font_w, font_h) = picker.font_size();
-    let pw = area.width as u32 * font_w as u32;
-    let ph = area.height as u32 * font_h as u32;
+    let pw = inner.width as u32 * font_w as u32;
+    let ph = inner.height as u32 * font_h as u32;
 
     if pw == 0 || ph == 0 {
         return;
@@ -166,24 +172,22 @@ fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfi
 
     let mut buf = vec![0u8; (pw * ph * 3) as usize];
 
+    // plotters rendering — no text (BitMapBackend panics without ttf).
+    // Title/labels are handled by the ratatui Block above.
     let ok = (|| -> Result<(), Box<dyn std::error::Error>> {
         let backend = BitMapBackend::with_buffer(&mut buf, (pw, ph));
         let root = backend.into_drawing_area();
         root.fill(&RGBColor(26, 26, 46))?;
 
         let mut chart = ChartBuilder::on(&root)
-            .caption(cfg.title, ("sans-serif", 14).into_font().color(&WHITE))
-            .margin(5)
-            .x_label_area_size(30)
-            .y_label_area_size(50)
+            .margin(2)
             .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
         chart
             .configure_mesh()
-            .x_desc(cfg.x_desc)
-            .y_desc(cfg.y_desc)
-            .axis_style(RGBColor(128, 128, 128))
-            .label_style(("sans-serif", 12).into_font().color(&RGBColor(200, 200, 200)))
+            .disable_axes()
+            .x_labels(0)
+            .y_labels(0)
             .light_line_style(RGBColor(50, 50, 70))
             .draw()?;
 
@@ -209,7 +213,7 @@ fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfi
 
     let mut protocol = picker.new_resize_protocol(dyn_img);
     let image_widget = StatefulImage::new(None);
-    f.render_stateful_widget(image_widget, area, &mut protocol);
+    f.render_stateful_widget(image_widget, inner, &mut protocol);
 }
 
 fn format_bytes(bytes: u64) -> String {
