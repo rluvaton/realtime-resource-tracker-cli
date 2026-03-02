@@ -181,8 +181,7 @@ impl App {
             .all_processes
             .iter()
             .filter(|p| {
-                p.name.to_lowercase().contains(&query)
-                    || p.pid.to_string().contains(&query)
+                p.name.to_lowercase().contains(&query) || p.pid.to_string().contains(&query)
             })
             .map(|p| ProcessInfo {
                 pid: p.pid,

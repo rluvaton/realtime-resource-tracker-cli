@@ -30,7 +30,9 @@ pub fn axis_style() -> Style {
 }
 
 pub fn error_style() -> Style {
-    Style::default().fg(ERROR_COLOR).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(ERROR_COLOR)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn highlight_style() -> Style {

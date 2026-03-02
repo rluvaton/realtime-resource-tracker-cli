@@ -72,10 +72,7 @@ fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
 fn draw_cpu_chart(f: &mut Frame, app: &App, area: Rect) {
     let cpu_data = app.cpu_series.as_chart_data();
 
-    let (x_min, x_max) = app
-        .cpu_series
-        .time_range()
-        .unwrap_or((0.0, 60.0));
+    let (x_min, x_max) = app.cpu_series.time_range().unwrap_or((0.0, 60.0));
     let x_max = x_max.max(x_min + 10.0);
 
     let x_labels = make_x_labels(x_min, x_max);
@@ -120,18 +117,11 @@ fn draw_cpu_chart(f: &mut Frame, app: &App, area: Rect) {
 fn draw_memory_chart(f: &mut Frame, app: &App, area: Rect) {
     let mem_data = app.mem_series.as_chart_data();
 
-    let (x_min, x_max) = app
-        .mem_series
-        .time_range()
-        .unwrap_or((0.0, 60.0));
+    let (x_min, x_max) = app.mem_series.time_range().unwrap_or((0.0, 60.0));
     let x_max = x_max.max(x_min + 10.0);
 
     let max_mem = app.mem_series.max_value();
-    let y_max = if max_mem <= 0.0 {
-        100.0
-    } else {
-        max_mem * 1.1
-    };
+    let y_max = if max_mem <= 0.0 { 100.0 } else { max_mem * 1.1 };
 
     let x_labels = make_x_labels(x_min, x_max);
     let y_labels = make_mem_y_labels(y_max);
