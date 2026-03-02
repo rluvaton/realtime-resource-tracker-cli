@@ -87,10 +87,13 @@ fn draw_summary<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
 }
 
 fn draw_cpu_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
-    let cpu_data = app.cpu_series.as_chart_data();
+    let raw_data = app.cpu_series.as_chart_data();
 
     let (x_min, x_max) = app.cpu_series.time_range().unwrap_or((0.0, 60.0));
     let x_max = x_max.max(x_min + 10.0);
+
+    let num_points = area.width.saturating_sub(10) as usize;
+    let cpu_data = interpolate_data(&raw_data, num_points);
 
     let x_labels = make_x_labels(x_min, x_max);
     let y_labels = vec![
@@ -132,13 +135,16 @@ fn draw_cpu_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
 }
 
 fn draw_memory_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
-    let mem_data = app.mem_series.as_chart_data();
+    let raw_data = app.mem_series.as_chart_data();
 
     let (x_min, x_max) = app.mem_series.time_range().unwrap_or((0.0, 60.0));
     let x_max = x_max.max(x_min + 10.0);
 
     let max_mem = app.mem_series.max_value();
     let y_max = if max_mem <= 0.0 { 100.0 } else { max_mem * 1.1 };
+
+    let num_points = area.width.saturating_sub(10) as usize;
+    let mem_data = interpolate_data(&raw_data, num_points);
 
     let x_labels = make_x_labels(x_min, x_max);
     let y_labels = make_mem_y_labels(y_max);
@@ -190,6 +196,48 @@ fn make_mem_y_labels(y_max: f64) -> Vec<Span<'static>> {
             Span::styled(format!("{:.0}", val), theme::axis_style())
         })
         .collect()
+}
+
+/// Linearly interpolate sparse data into `num_points` evenly-spaced points
+/// so the chart line has no gaps between cells.
+fn interpolate_data(data: &[(f64, f64)], num_points: usize) -> Vec<(f64, f64)> {
+    if data.len() < 2 || num_points < 2 {
+        return data.to_vec();
+    }
+
+    let x_min = data.first().unwrap().0;
+    let x_max = data.last().unwrap().0;
+    if (x_max - x_min).abs() < f64::EPSILON {
+        return data.to_vec();
+    }
+
+    let step = (x_max - x_min) / (num_points - 1) as f64;
+    let mut result = Vec::with_capacity(num_points);
+    let mut idx = 0;
+
+    for i in 0..num_points {
+        let x = x_min + step * i as f64;
+
+        // Advance to the segment containing x
+        while idx + 1 < data.len() && data[idx + 1].0 < x {
+            idx += 1;
+        }
+
+        if idx + 1 >= data.len() {
+            result.push((x, data.last().unwrap().1));
+        } else {
+            let (x0, y0) = data[idx];
+            let (x1, y1) = data[idx + 1];
+            let t = if (x1 - x0).abs() < f64::EPSILON {
+                0.0
+            } else {
+                (x - x0) / (x1 - x0)
+            };
+            result.push((x, y0 + t * (y1 - y0)));
+        }
+    }
+
+    result
 }
 
 fn format_bytes(bytes: u64) -> String {
