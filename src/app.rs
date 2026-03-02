@@ -3,7 +3,7 @@ use std::time::Instant;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
 use crate::metrics::TimeSeries;
-use crate::sampler::{ProcessInfo, Sampler};
+use crate::sampler::{ProcessInfo, ProcessSampler, Sampler};
 
 const RING_CAPACITY: usize = 300;
 
@@ -13,7 +13,7 @@ pub enum AppMode {
     Monitoring,
 }
 
-pub struct App {
+pub struct App<S: ProcessSampler = Sampler> {
     pub mode: AppMode,
     pub target_pid: u32,
     pub last_sample: Option<ProcessInfo>,
@@ -28,13 +28,23 @@ pub struct App {
     pub filtered_processes: Vec<ProcessInfo>,
     pub picker_index: usize,
 
-    sampler: Sampler,
+    pub sampler: S,
     start_time: Instant,
     interval_ms: u64,
 }
 
-impl App {
+impl App<Sampler> {
     pub fn new_monitoring(pid: u32, interval_secs: f64) -> Self {
+        Self::new_monitoring_with_sampler(pid, interval_secs, Sampler::new())
+    }
+
+    pub fn new_picker(interval_secs: f64) -> Self {
+        Self::new_picker_with_sampler(interval_secs, Sampler::new())
+    }
+}
+
+impl<S: ProcessSampler> App<S> {
+    pub fn new_monitoring_with_sampler(pid: u32, interval_secs: f64, sampler: S) -> Self {
         Self {
             mode: AppMode::Monitoring,
             target_pid: pid,
@@ -47,14 +57,13 @@ impl App {
             all_processes: Vec::new(),
             filtered_processes: Vec::new(),
             picker_index: 0,
-            sampler: Sampler::new(),
+            sampler,
             start_time: Instant::now(),
             interval_ms: (interval_secs * 1000.0) as u64,
         }
     }
 
-    pub fn new_picker(interval_secs: f64) -> Self {
-        let mut sampler = Sampler::new();
+    pub fn new_picker_with_sampler(interval_secs: f64, mut sampler: S) -> Self {
         let all = sampler.list_all_processes();
         let filtered = all
             .iter()
@@ -127,7 +136,7 @@ impl App {
         Ok(())
     }
 
-    fn handle_monitoring_key(&mut self, key: KeyCode) {
+    pub fn handle_monitoring_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                 self.should_quit = true;
@@ -136,7 +145,7 @@ impl App {
         }
     }
 
-    fn handle_picker_key(&mut self, key: KeyCode) {
+    pub fn handle_picker_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Esc => {
                 self.should_quit = true;

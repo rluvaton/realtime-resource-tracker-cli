@@ -1,10 +1,3 @@
-mod app;
-mod cli;
-mod error;
-mod metrics;
-mod sampler;
-mod ui;
-
 use std::io;
 
 use anyhow::Result;
@@ -15,10 +8,11 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use crate::app::App;
-use crate::cli::Args;
-use crate::error::AppError;
-use crate::sampler::Sampler;
+use realtime_resource_tracker_cli::app::App;
+use realtime_resource_tracker_cli::cli::Args;
+use realtime_resource_tracker_cli::error::AppError;
+use realtime_resource_tracker_cli::sampler::Sampler;
+use realtime_resource_tracker_cli::ui;
 
 /// RAII guard that restores the terminal on drop, even on panic.
 struct TerminalGuard;

@@ -48,6 +48,10 @@ impl TimeSeries {
         self.data.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     pub fn time_range(&self) -> Option<(f64, f64)> {
         if self.data.is_empty() {
             return None;

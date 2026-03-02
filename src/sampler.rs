@@ -7,9 +7,20 @@ pub struct ProcessInfo {
     pub memory_bytes: u64,
 }
 
+pub trait ProcessSampler {
+    fn sample(&mut self, pid: u32) -> Option<ProcessInfo>;
+    fn list_all_processes(&mut self) -> Vec<ProcessInfo>;
+}
+
 pub struct Sampler {
     system: System,
     num_cpus: usize,
+}
+
+impl Default for Sampler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Sampler {
@@ -20,8 +31,18 @@ impl Sampler {
         Self { system, num_cpus }
     }
 
-    /// Sample metrics for a single process. Returns None if process no longer exists.
-    pub fn sample(&mut self, pid: u32) -> Option<ProcessInfo> {
+    /// Returns true if the given PID exists.
+    pub fn pid_exists(&mut self, pid: u32) -> bool {
+        self.system.refresh_processes(
+            sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+            true,
+        );
+        self.system.process(Pid::from_u32(pid)).is_some()
+    }
+}
+
+impl ProcessSampler for Sampler {
+    fn sample(&mut self, pid: u32) -> Option<ProcessInfo> {
         self.system.refresh_processes(
             sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
             true,
@@ -39,17 +60,7 @@ impl Sampler {
         })
     }
 
-    /// Returns true if the given PID exists.
-    pub fn pid_exists(&mut self, pid: u32) -> bool {
-        self.system.refresh_processes(
-            sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-            true,
-        );
-        self.system.process(Pid::from_u32(pid)).is_some()
-    }
-
-    /// List all running processes, sorted by CPU usage descending.
-    pub fn list_all_processes(&mut self) -> Vec<ProcessInfo> {
+    fn list_all_processes(&mut self) -> Vec<ProcessInfo> {
         self.system.refresh_all();
         let num_cpus = self.num_cpus;
 

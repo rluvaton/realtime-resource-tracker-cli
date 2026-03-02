@@ -7,9 +7,10 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::sampler::ProcessSampler;
 use crate::ui::theme;
 
-pub fn draw(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Percentage(50),
@@ -22,7 +23,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     draw_memory_chart(f, app, chunks[2]);
 }
 
-fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
+fn draw_summary<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let (pid, name, cpu, mem) = if let Some(info) = &app.last_sample {
         (
             format!("{}", info.pid),
@@ -69,7 +70,7 @@ fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_cpu_chart(f: &mut Frame, app: &App, area: Rect) {
+fn draw_cpu_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let cpu_data = app.cpu_series.as_chart_data();
 
     let (x_min, x_max) = app.cpu_series.time_range().unwrap_or((0.0, 60.0));
@@ -114,7 +115,7 @@ fn draw_cpu_chart(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(chart, area);
 }
 
-fn draw_memory_chart(f: &mut Frame, app: &App, area: Rect) {
+fn draw_memory_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let mem_data = app.mem_series.as_chart_data();
 
     let (x_min, x_max) = app.mem_series.time_range().unwrap_or((0.0, 60.0));

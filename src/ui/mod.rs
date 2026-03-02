@@ -5,8 +5,9 @@ pub mod theme;
 use ratatui::Frame;
 
 use crate::app::{App, AppMode};
+use crate::sampler::ProcessSampler;
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>) {
     let area = f.area();
 
     if area.width < 40 || area.height < 10 {

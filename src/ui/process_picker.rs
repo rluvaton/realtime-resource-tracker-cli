@@ -7,9 +7,10 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::sampler::ProcessSampler;
 use crate::ui::theme;
 
-pub fn draw(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(5),
@@ -22,7 +23,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     draw_help_bar(f, chunks[2]);
 }
 
-fn draw_search_box(f: &mut Frame, app: &App, area: Rect) {
+fn draw_search_box<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let input = format!("> {}", app.search_query);
 
     let block = Block::default()
@@ -39,7 +40,7 @@ fn draw_search_box(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_process_list(f: &mut Frame, app: &App, area: Rect) {
+fn draw_process_list<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     let header = ListItem::new(Line::from(vec![
         Span::styled(format!("{:<8}", "PID"), theme::label_style()),
         Span::styled(format!("{:<20}", "NAME"), theme::label_style()),
