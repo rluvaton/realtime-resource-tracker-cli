@@ -165,18 +165,18 @@ fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfi
     let (y_min, y_max) = cfg.y_range;
 
     let mut buf = vec![0u8; (pw * ph * 3) as usize];
-    {
+
+    let ok = (|| -> Result<(), Box<dyn std::error::Error>> {
         let backend = BitMapBackend::with_buffer(&mut buf, (pw, ph));
         let root = backend.into_drawing_area();
-        root.fill(&RGBColor(26, 26, 46)).unwrap();
+        root.fill(&RGBColor(26, 26, 46))?;
 
         let mut chart = ChartBuilder::on(&root)
             .caption(cfg.title, ("sans-serif", 14).into_font().color(&WHITE))
             .margin(5)
             .x_label_area_size(30)
             .y_label_area_size(50)
-            .build_cartesian_2d(x_min..x_max, y_min..y_max)
-            .unwrap();
+            .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
         chart
             .configure_mesh()
@@ -185,22 +185,26 @@ fn render_chart(f: &mut Frame, area: Rect, picker: &mut Picker, cfg: &ChartConfi
             .axis_style(RGBColor(128, 128, 128))
             .label_style(("sans-serif", 12).into_font().color(&RGBColor(200, 200, 200)))
             .light_line_style(RGBColor(50, 50, 70))
-            .draw()
-            .unwrap();
+            .draw()?;
 
         if cfg.data.len() >= 2 {
-            chart
-                .draw_series(LineSeries::new(
-                    cfg.data.iter().map(|&(x, y)| (x, y)),
-                    cfg.line_color,
-                ))
-                .unwrap();
+            chart.draw_series(LineSeries::new(
+                cfg.data.iter().map(|&(x, y)| (x, y)),
+                cfg.line_color,
+            ))?;
         }
 
-        root.present().unwrap();
+        root.present()?;
+        Ok(())
+    })();
+
+    if ok.is_err() {
+        return;
     }
 
-    let img = RgbImage::from_raw(pw, ph, buf).unwrap();
+    let Some(img) = RgbImage::from_raw(pw, ph, buf) else {
+        return;
+    };
     let dyn_img = DynamicImage::ImageRgb8(img);
 
     let mut protocol = picker.new_resize_protocol(dyn_img);

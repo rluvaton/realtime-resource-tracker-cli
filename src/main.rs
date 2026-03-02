@@ -44,9 +44,12 @@ fn main() -> Result<()> {
         return Err(AppError::IntervalTooSmall(args.interval).into());
     }
 
-    // Detect terminal graphics protocol before entering raw mode
-    let picker = Picker::from_query_stdio()
-        .unwrap_or_else(|_| Picker::from_fontsize((8, 16)));
+    // Detect terminal graphics protocol before entering raw mode.
+    // Use catch_unwind because from_query_stdio can panic in some terminals.
+    let picker = std::panic::catch_unwind(Picker::from_query_stdio)
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or_else(|| Picker::from_fontsize((8, 16)));
 
     let mut app = if let Some(pid) = args.pid {
         let mut sampler = Sampler::new();
