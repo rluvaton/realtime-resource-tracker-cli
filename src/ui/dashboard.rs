@@ -86,7 +86,7 @@ fn draw_cpu_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect) {
     ];
 
     let datasets = vec![Dataset::default()
-        .marker(symbols::Marker::Braille)
+        .marker(symbols::Marker::HalfBlock)
         .graph_type(GraphType::Line)
         .style(theme::cpu_style())
         .data(&cpu_data)];
@@ -128,7 +128,7 @@ fn draw_memory_chart<S: ProcessSampler>(f: &mut Frame, app: &App<S>, area: Rect)
     let y_labels = make_mem_y_labels(y_max);
 
     let datasets = vec![Dataset::default()
-        .marker(symbols::Marker::Braille)
+        .marker(symbols::Marker::HalfBlock)
         .graph_type(GraphType::Line)
         .style(theme::memory_style())
         .data(&mem_data)];
